@@ -1,0 +1,66 @@
+clean: &clean
+    machine: true
+    steps:
+    - checkout
+
+    - attach_workspace:
+        at: .
+
+    - run: ./scripts/credentials.sh ${TYPE}
+
+    - run: ./ci-cleaner aws --access-key-id ${AWS_ACCESS_KEY_ID} --secret-access-key ${AWS_SECRET_ACCESS_KEY} --region ${AWS_DEFAULT_REGION}
+
+
+version: 2
+jobs:
+  build:
+    machine: true
+    steps:
+    - checkout
+
+    - run: |
+        wget -q $(curl -sS https://api.github.com/repos/giantswarm/architect/releases/latest | grep browser_download_url | head -n 1 | cut -d '"' -f 4)
+        chmod +x ./architect
+        ./architect version
+
+    - run: ./architect build
+
+    - persist_to_workspace:
+        root: .
+        paths:
+        - ./ci-cleaner
+
+  cleanHost:
+    environment:
+      TYPE: "host"
+    <<: *clean
+
+  cleanGuest:
+    environment:
+      TYPE: "guest"
+    <<: *clean
+
+
+workflows:
+  version: 2
+
+  buildPush:
+    jobs:
+    - build
+
+  cleanup:
+    triggers:
+    - schedule:
+      cron: "0 * * * *"
+      filters:
+        branches:
+          only: master
+
+    jobs:
+    - build
+    - cleanGuest:
+        requires:
+        - build
+    - cleanHost:
+        requires:
+        - build
